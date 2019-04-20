@@ -4,9 +4,9 @@ from torch.autograd import Variable
 import numpy as np
 
 class DQN_player:
-    def __init__(self, chip, is_selfplay=0):
+    def __init__(self, chip, dqn, is_selfplay=0):
         self.chip = chip
-        self.dqn = DQN(self.chip.chip_size, self.chip.max_depth)
+        self.dqn = dqn
         self._is_selfplay = is_selfplay
         self.epsilon = 0.9  # greedy policy
 

@@ -22,6 +22,7 @@ class Net(nn.Module):
         kernel_size1 = 11
         kernel_size2 = 7
         kernel_size3 = 5
+        self.layers = 20
         self.chip_size = chip_size
         self.max_depth = max_depth
         # circuit input 
@@ -43,11 +44,17 @@ class Net(nn.Module):
         #self.conv3 = nn.Conv2d(128, 64, kernel_size3, padding = kernel_size3 // 2)
         #self.conv33 = nn.Conv2d(64, 64, kernel_size3, padding = kernel_size3 // 2)
         self.conv1 = nn.Linear(chip_size, 2 * chip_size)
-        self.conv11 = nn.Linear(2 * chip_size, 2 * chip_size)
+        self.conv11 = []
+        for i in range(self.layers):
+            self.conv11.append(nn.Linear(2 * chip_size, 2 * chip_size))
         self.conv2 = nn.Linear(2 * chip_size, 4 * chip_size)
-        self.conv22 = nn.Linear(4 * chip_size, 4 * chip_size)
+        self.conv22 = []
+        for i in range(self.layers):
+            self.conv22.append(nn.Linear(4 * chip_size, 4 * chip_size))
         self.conv3 = nn.Linear(4 * chip_size, 8 * chip_size)
-        self.conv33 = nn.Linear(8 * chip_size, 8 * chip_size)
+        self.conv33 = []
+        for i in range(self.layers):
+            self.conv33.append(nn.Linear(8 * chip_size, 8 * chip_size))
         # action policy layers
         #self.act_conv1 = nn.Conv2d(64, 4, kernel_size=1)
         #self.act_fc1 = nn.Linear(4 * chip_size * max_depth,
@@ -98,14 +105,14 @@ class Net(nn.Module):
             x = x + y
             # common layers
             x = F.relu(self.conv1(x))
-            for ii in range(10):
-                x = F.relu(self.conv11(x) + x)
+            for ii in range(self.layers):
+                x = F.relu(self.conv11[ii](x) + x)
             x = F.relu(self.conv2(x))
-            for ii in range(10):
-                x = F.relu(self.conv22(x) + x)
+            for ii in range(self.layers):
+                x = F.relu(self.conv22[ii](x) + x)
             x = F.relu(self.conv3(x))
-            for ii in range(10):
-                x = F.relu(self.conv33(x) + x)
+            for ii in range(self.layers):
+                x = F.relu(self.conv33[ii](x) + x)
             # action policy layers
             #x_act = F.relu(self.act_conv1(x))
             #x_act = x_act.view(-1, 4 * self.chip_size * self.max_depth)

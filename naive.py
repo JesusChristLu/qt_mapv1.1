@@ -2,9 +2,10 @@ from copy import deepcopy
 import random
 class Naive(object):
     
-    def __init__(self, chip, compiler):
+    def __init__(self, chip, compiler, gamma = 0.01):
         self.chip = chip
         self.compiler = compiler
+        self.gamma = gamma
 
     def list_next_state(self, E):
         next_E = {}
@@ -25,7 +26,7 @@ class Naive(object):
         for i in next_E:
             newchip.E = next_E[i]
             newchip.state['E'] = next_E[i]
-            temp_dist = newchip.compute_layers_distance()
+            temp_dist = newchip.compute_layers_distance(self.gamma)
             distances.append(temp_dist)
             if temp_dist < distance:
                 distance = temp_dist

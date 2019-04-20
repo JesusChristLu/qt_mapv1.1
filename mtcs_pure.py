@@ -2,7 +2,6 @@
 
 import numpy as np
 import copy
-from copy import deepcopy
 
 
 def softmax(x):
@@ -23,7 +22,6 @@ class TreeNode(object):
         self._children = {}  # a map from action to TreeNode
         self._n_visits = 0
         self._Q = 0
-        self._w = 0
         self._u = 0
         self._P = prior_p
 
@@ -52,8 +50,7 @@ class TreeNode(object):
         # Count visit.
         self._n_visits += 1
         # Update Q, a running average of values for all visits.
-        self._w += leaf_value
-        self._Q = self._w / self._n_visits
+        self._Q += 1.0*(leaf_value + self._Q) / self._n_visits
 
     def update_recursive(self, leaf_value, gamma):
         """Like a call to update(), but applied recursively for all ancestors.
@@ -70,7 +67,8 @@ class TreeNode(object):
         c_puct: a number in (0, inf) controlling the relative impact of
             value Q, and prior probability P, on this node's score.
         """
-        self._u = (c_puct * self._P * np.sqrt(self._parent._n_visits) / (0.1 + self._n_visits))
+        self._u = (c_puct * self._P *
+                   np.sqrt(self._parent._n_visits) / (1 + self._n_visits))
         return self._Q + self._u
 
     def is_leaf(self):
@@ -84,7 +82,7 @@ class TreeNode(object):
 class MCTS(object):
     """An implementation of Monte Carlo Tree Search."""
 
-    def __init__(self, policy_value_fn, count_remain_gate, c_puct=5, n_playout=10000):
+    def __init__(self, policy_value_fn, c_puct=5, n_playout=10000):
         """
         policy_value_fn: a function that takes in a board state and outputs
             a list of (action, probability) tuples and also a score in [-1, 1]
@@ -94,19 +92,14 @@ class MCTS(object):
             converges to the maximum-value policy. A higher value means
             relying on the prior more.
         """
-        self._gamma = 0.9
-        self._lambda = 0.7
-        self._discount = 0.9
-        self._punish = 0.7
+        self._gamma = 0.8
         self._root = TreeNode(None, 1.0)
         self._policy = policy_value_fn
         self._c_puct = c_puct
         self._n_playout = n_playout
         self._action = 0
-        self.count_remain_gate = count_remain_gate
 
     def _playout(self, state, r_d, w_d):
-        #max((swap_number - 1), 0)
         """Run a single playout from the root to the leaf, getting a value at
         the leaf and propagating it back through its parents.
         State is modified in-place, so a copy must be provided.
@@ -114,62 +107,35 @@ class MCTS(object):
         node = self._root
         remain_depth = r_d
         whole_depth = w_d
-        curr_q = deepcopy(state.state['q'].q[0])
-        nothing_had_done = False
-        integral = 0
-        swap_number = 0
-        #deep = 0
+        total_swap_number = 0
         while(1):
-            #q = []
-            #u = []
-            #ucb = []
-            #for i in node._children.items():
-            #    q.append(i[1]._Q)
-            #    u.append(i[1]._u)
-            #    ucb.append(i[1]._Q + i[1]._u)
-            #print(q)
-            #deep += 1
-            #print(u)
-            #print(ucb)
-            small_reward = 0
+            swap_number = 0
             if node.is_leaf():
                 break
             # Greedily select next move.
             action, node = node.select(self._c_puct)
-            #print(deep, action, node)
             self._action = action
-            temp_remain_depth, swap_number = state.do_move(action, remain_depth, nothing_had_done, simulate = True)
-            integral = (whole_depth - remain_depth) + (remain_depth - temp_remain_depth) * (self._discount ** swap_number)
-            if remain_depth > temp_remain_depth:
-                remain_depth = temp_remain_depth
-                nothing_had_done = False
-            elif False not in (state.state['q'].q[0] == curr_q):
-                nothing_had_done = True
-            else:
-                nothing_had_done = False
-                small_reward = self.count_remain_gate(curr_q, state.state['q'].q[0]) / (len([i for i in state.state['E'] if i > 0]) // 2)
-            if remain_depth:
-                curr_q = deepcopy(state.state['q'].q[0])  
-            else:
-                break
+            temp_remain_depth, swap_number = state.do_move(action, remain_depth, nothing_had_done = False, simulate = True)
+            remain_depth = temp_remain_depth
+            total_swap_number += swap_number
         # Evaluate the leaf using a network which outputs a list of
-        # (action, probability) tuples p and also a score v in [0, 1]
+        # (action, probability) tuples p and also a score v in [-1, 1]
         # for the current player.
-        action_probs, leaf_value_eval = self._policy(state)
+        action_probs = self._policy(state)
         actions, probs = [], []
-        #for i in action_probs:
-        #    actions.append(i[0])
-        #    probs.append(i[1])
-        actions, probs = zip(*action_probs)
+        for i in action_probs:
+            actions.append(i[0])
+            probs.append(i[1])
+        #actions, probs = zip(*action_probs)
         # Check for end of game.
-        leaf_value_search = (integral + small_reward) / whole_depth 
+        leaf_value_search = (whole_depth - remain_depth) / whole_depth
         if remain_depth:
             node.expand(actions, probs)
-        #else:
-        #    print('good! you are so fucking lucky!!!!')
+        else:
+            print('good! you are so fucking lucky!!!!')
         # Update value and visit count of nodes in this traversal.
-        leaf_value = self._lambda * leaf_value_eval + (1 - self._lambda) * leaf_value_search
-        node.update_recursive(leaf_value * (self._punish ** swap_number), self._gamma)
+        leaf_value = leaf_value_search
+        node.update_recursive(((self._gamma) ** total_swap_number) * leaf_value, self._gamma)
 
     def get_move_probs(self, state, remain_depth, whole_depth, temp=1e-3):
         """Run all playouts sequentially and return the available actions and
@@ -197,13 +163,14 @@ class MCTS(object):
         """Step forward in the tree, keeping everything we already know
         about the subtree.
         """
-        
+        self._root = TreeNode(None, 1.0)
+        '''
         if last_move in self._root._children:
             self._root = self._root._children[last_move]
             self._root._parent = None
         else:
             self._root = TreeNode(None, 1.0)
-        
+        '''
     def __str__(self):
         return "MCTS"
 
@@ -211,9 +178,9 @@ class MCTS(object):
 class MCTSPlayer(object):
     """AI player based on MCTS"""
 
-    def __init__(self, policy_value_function, count_remain_gate,
-                 c_puct=5, n_playout=2000, is_selfplay=0):
-        self.mcts = MCTS(policy_value_function, count_remain_gate, c_puct, n_playout)
+    def __init__(self, available, c_puct=5, n_playout=2000, is_selfplay=0):
+        self.available
+        self.mcts = MCTS(self.policy_value_function, c_puct, n_playout)
         self._is_selfplay = is_selfplay
 
     def reset_player(self):
@@ -233,12 +200,7 @@ class MCTSPlayer(object):
         '''
         move_probs[list(acts)] = probs
         if self._is_selfplay:
-            # add Dirichlet Noise for exploration (needed for
-            # self-play training)
-            move = np.random.choice(
-                acts,
-                p=0.9*probs + 0.1*np.random.dirichlet(0.3*np.ones(len(probs)))
-            )
+            move = np.random.choice(acts, p=probs)
             # update the root node and reuse the search tree
             self.mcts.update_with_move(move)
         else:
@@ -254,6 +216,14 @@ class MCTSPlayer(object):
             return move, move_probs
         else:
             return move
+
+    def policy_value_function(self):
+        length = 0
+        for i in self.available:
+            if i != None:
+                length += 1
+        prob = np.ones(length)
+        return prob / length
 
     def __str__(self):
         return "MCTS {}".format(self.player)

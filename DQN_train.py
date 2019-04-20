@@ -19,27 +19,32 @@ from DQN_player import DQN_player
 from net_generate import Circuit_Generate
 from torch.autograd import Variable
 from rule import Chip, Compile
+from main import read_data, write_data
+from train import count_remain_gate
 import torch
 import torch.nn
 
 class DQN_train():
-    def __init__(self, newnet, logical_number, circuit, init_model=None):
+    def __init__(self, newnet, logical_number, circuit, count_remain_gate, init_model=None):
         # params of the board and the game
         self.chip = Chip(newnet)
         self.circuit = circuit
-        self.compile = Compile(self.chip, logical_number)
+        self.compile = Compile(self.chip, logical_number, count_remain_gate)
         self.epsilon = 0.9  # greedy policy
         self.target_replace_iter = 100  # target update frequency
-        self.memory_capacity = 20
+        self.memory_capacity = 10000
+        #self.memory_capacity = 500###################
         self.learn_rate = 2e-3
         self.lr_multiplier = 1.0  # adaptively adjust the learning rate based on KL
         self.temp = 1.0  # the temperature param
-        self.batch_size = 5  # mini-batch size for training
+        self.batch_size = 200  # mini-batch size for training
+        #self.batch_size = 80##########################
         self.memory = deque(maxlen=self.memory_capacity)
         self.play_batch_size = 1
         self.epochs = 5  # num of train_steps for each update
-        self.check_freq = 2
-        self.game_batch_num = 150
+        self.check_freq = 50
+        self.game_batch_num = 100
+        #self.game_batch_num = 100#########################
         self.kl_targ = 0.02
         if init_model:
             # start training from an initial policy-value net
@@ -47,13 +52,12 @@ class DQN_train():
         else:
             # start training from a new policy-value net
             self.dqn = DQN(self.chip.chip_size, self.chip.max_depth)
-        self.dqn_player = DQN_player(self.chip,
-                                      is_selfplay=1)
+        self.dqn_player = DQN_player(self.chip, self.dqn, is_selfplay=1)
 
     def collect_selfplay_data(self, whole_depth, logical_number, n_games = 1):
         """collect self-play data for training"""
         for i in range(n_games):
-            play_data = self.compile.start_dqn_self_play(self.dqn_player, whole_depth,
+            play_data, total_swap_number, time = self.compile.start_dqn_self_play(self.dqn_player, whole_depth,
                                                      logical_number, temp=self.temp)
             play_data = list(play_data)[:]
             self.episode_len = len(play_data)
@@ -61,6 +65,7 @@ class DQN_train():
             for i in range(self.episode_len - 1):
                 data.append(play_data[i] + (play_data[i + 1][0],))
             self.memory.extend(data)
+        return total_swap_number, time
 
     def get_param(self):
         net_params = self.dqn.eval_net.state_dict()
@@ -102,23 +107,34 @@ class DQN_train():
 
     def run(self, whole_depth, logical_number):
         '''run the training'''
-        #try:
+        #init_model = '.\\model\\dqn_net3_3.model'
+        #self.dqn = DQN(self.chip.chip_size, self.chip.max_depth, init_model)
+        #self.dqn_player = DQN_player(self.chip, self.dqn, is_selfplay=1)
+        losses = np.zeros([self.game_batch_num])
+        times = np.zeros([self.game_batch_num])
+        swaps = np.zeros([self.game_batch_num])
         for i in range(self.game_batch_num):
-            self.collect_selfplay_data(whole_depth, logical_number, self.play_batch_size)
-            print('batch i:{}, episode_len'.format(i + 1, self.episode_len))
+            swap, time = self.collect_selfplay_data(whole_depth, logical_number, self.play_batch_size)
+            print('batch i:{}, episode_len:{}'.format(i + 1, self.episode_len))
             if len(self.memory) > self.batch_size:
                 loss = self.learn()
-                print(loss)
-        #except:
-        #    print('\n\rquit')
+                loss = loss.data.numpy()[0]
+                losses[i] = loss
+                times[i] = time
+                swaps[i] = swap
+                print(loss, swap)
+        write_data('.\\loss\\dqn_3x3_5_30', losses, 'a', 'f')
+        write_data('.\\data\\dqn_swap_3x3_5_30', swaps, 'a', 'f')
+        write_data('.\\data\\dqn_time_3x3_5_30', times, 'a', 'f')
+        self.dqn.save_model('.\\model\\dqn_net3_3.model')
 
+        
 if __name__ == '__main__':
-    logical_number = 5
-    chip_size = 8
-    whole_depth = 10
-    net = ng.Net_Generate(0, 1, chip_size)
-    circuit = ng.Circuit_Generate(whole_depth, logical_number)
+    whole_depth = 30
+    logical_bit_number = 5
+    net = ng.Net_Generate(N = 0, name = '.\\chips\\chip_3x3.txt', is_read = True)
+    circuit = ng.Circuit_Generate(whole_depth, logical_bit_number)
     #net.draw_graph()
     #print(circuit.q)
-    dqn_train = DQN_train(net, logical_number, circuit)
-    dqn_train.run(whole_depth, logical_number)
+    dqn_train = DQN_train(net, logical_bit_number, circuit, count_remain_gate)
+    dqn_train.run(whole_depth, logical_bit_number)
